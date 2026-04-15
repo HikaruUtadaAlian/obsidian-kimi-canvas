@@ -151,12 +151,31 @@
 	color: var(--text-success);
 }
 
+.kimi-msg-images {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-bottom: 8px;
+}
+
+.kimi-msg-thumb {
+	max-width: 120px;
+	max-height: 90px;
+	border-radius: 6px;
+	border: 1px solid var(--background-modifier-border);
+	object-fit: cover;
+}
+
 .kimi-canvas-input-area {
 	display: flex;
 	gap: 8px;
 	padding: 10px 12px;
 	border-top: 1px solid var(--background-modifier-border);
 	background: var(--background-secondary);
+}
+
+.kimi-file-input {
+	display: none;
 }
 
 .kimi-canvas-input {
@@ -178,6 +197,7 @@
 	border-color: var(--interactive-accent);
 }
 
+.kimi-canvas-attach-btn,
 .kimi-canvas-send-btn {
 	width: 40px;
 	height: 40px;
@@ -192,7 +212,18 @@
 	flex-shrink: 0;
 }
 
-.kimi-canvas-send-btn:disabled {
+.kimi-canvas-attach-btn {
+	background: var(--background-modifier-border-hover);
+	color: var(--text-muted);
+}
+
+.kimi-canvas-attach-btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.kimi-canvas-send-btn:disabled,
+.kimi-canvas-attach-btn:disabled {
 	opacity: 0.6;
 	cursor: not-allowed;
 }

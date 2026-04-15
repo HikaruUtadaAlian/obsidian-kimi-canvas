@@ -1,7 +1,7 @@
 import { ItemView, WorkspaceLeaf, TFile, setIcon } from "obsidian";
 import type KimiCanvasPlugin from "./main";
 import type { CanvasData } from "./canvas-manager";
-import type { ACPChunk } from "./kimi-bridge";
+import type { ACPChunk, ImagePayload } from "./kimi-bridge";
 
 export const VIEW_TYPE_KIMI_CHAT = "kimi-canvas-chat";
 
@@ -26,6 +26,9 @@ export class KimiChatView extends ItemView {
 	currentAssistantThinking?: HTMLElement;
 	currentAssistantText = "";
 	currentThinkingText = "";
+
+	// Pending images for next prompt
+	pendingImages: ImagePayload[] = [];
 
 	constructor(leaf: WorkspaceLeaf, plugin: KimiCanvasPlugin) {
 		super(leaf);
@@ -56,6 +59,10 @@ export class KimiChatView extends ItemView {
 
 		const controls = header.createEl("span", { cls: "kimi-canvas-header-controls" });
 
+		const screenshotBtn = controls.createEl("button", { cls: "kimi-canvas-header-btn", attr: { "aria-label": "Capture canvas screenshot" } });
+		setIcon(screenshotBtn, "camera");
+		screenshotBtn.addEventListener("click", () => this.triggerManualScreenshot());
+
 		const reconnectBtn = controls.createEl("button", { cls: "kimi-canvas-header-btn", attr: { "aria-label": "Reconnect ACP" } });
 		setIcon(reconnectBtn, "refresh-cw");
 		reconnectBtn.addEventListener("click", () => {
@@ -76,6 +83,18 @@ export class KimiChatView extends ItemView {
 
 		// Input area
 		const inputArea = contentEl.createEl("div", { cls: "kimi-canvas-input-area" });
+
+		// Hidden file input
+		const fileInput = inputArea.createEl("input", {
+			cls: "kimi-file-input",
+			attr: { type: "file", accept: "image/*", multiple: "true" },
+		});
+		fileInput.addEventListener("change", (evt) => this.onFileSelected(evt));
+
+		const attachBtn = inputArea.createEl("button", { cls: "kimi-canvas-attach-btn", attr: { "aria-label": "Attach image" } });
+		setIcon(attachBtn, "paperclip");
+		attachBtn.addEventListener("click", () => fileInput.click());
+
 		this.inputEl = inputArea.createEl("textarea", { cls: "kimi-canvas-input" });
 		this.inputEl.placeholder = "Ask Kimi about your canvas, or type a command...";
 		this.inputEl.addEventListener("keydown", (evt) => {
@@ -147,23 +166,30 @@ export class KimiChatView extends ItemView {
 			"Welcome! I can help you organize and generate Canvas boards.\n" +
 			"- Open a .canvas file, then chat here.\n" +
 			"- I can create nodes, connect ideas, and auto-layout your board.\n" +
+			"- You can attach screenshots (📎) or let Kimi request a screen capture.\n" +
 			"- Make sure you have run `kimi login` in terminal."
 		);
 	}
 
-	appendUserMessage(text: string): void {
+	appendUserMessage(text: string, imagePreviews?: string[]): void {
 		this.messages.push({ role: "user", content: text, ts: Date.now() });
-		this.renderStaticMessage("user", text);
+		this.renderStaticMessage("user", text, imagePreviews);
 	}
 
 	appendSystemMessage(text: string): void {
 		this.renderStaticMessage("system", text);
 	}
 
-	renderStaticMessage(role: "user" | "assistant" | "system", text: string): void {
+	renderStaticMessage(role: "user" | "assistant" | "system", text: string, imagePreviews?: string[]): void {
 		if (!this.messageContainer) return;
 		const row = this.messageContainer.createEl("div", { cls: `kimi-msg-row kimi-msg-${role}` });
 		const bubble = row.createEl("div", { cls: "kimi-msg-bubble" });
+		if (imagePreviews && imagePreviews.length > 0) {
+			const imgContainer = bubble.createEl("div", { cls: "kimi-msg-images" });
+			for (const src of imagePreviews) {
+				imgContainer.createEl("img", { cls: "kimi-msg-thumb", attr: { src } });
+			}
+		}
 		bubble.createEl("div", { cls: "kimi-msg-content" }).innerHTML = this.markdownToHtml(text);
 		this.scrollToBottom();
 	}
@@ -211,6 +237,16 @@ export class KimiChatView extends ItemView {
 		let displayText = info.fullText;
 		const activeCanvas = this.getActiveCanvasFile();
 		let canvasApplied = false;
+
+		// Check for screenshot action request
+		if (displayText.includes("// kimi-action: screenshot")) {
+			if (this.plugin.settings.autoScreenshotOnLayoutRequest) {
+				this.setProcessing(false);
+				this.updateStatus(this.plugin.kimi.currentState);
+				await this.handleScreenshotAction();
+				return;
+			}
+		}
 
 		if (activeCanvas) {
 			const op = this.plugin.canvasManager.parseCanvasOpBlock(displayText);
@@ -261,15 +297,20 @@ export class KimiChatView extends ItemView {
 	async sendMessage(): Promise<void> {
 		if (!this.inputEl) return;
 		const text = this.inputEl.value.trim();
-		if (!text || this.isProcessing) return;
+		if ((!text && this.pendingImages.length === 0) || this.isProcessing) return;
 
 		if (this.plugin.kimi.currentState !== "ready") {
 			this.appendSystemMessage("Kimi ACP is not ready yet. Please wait a moment or click the reconnect button.");
 			return;
 		}
 
+		const imagesToSend = [...this.pendingImages];
+		this.pendingImages = [];
+		this.clearPendingImagePreview();
+
 		this.inputEl.value = "";
-		this.appendUserMessage(text);
+		const imagePreviews = imagesToSend.map((img) => `data:${img.mimeType};base64,${img.data}`);
+		this.appendUserMessage(text || "(image)", imagePreviews);
 		this.setProcessing(true);
 		this.updateStatus("prompting");
 
@@ -279,14 +320,116 @@ export class KimiChatView extends ItemView {
 		if (activeCanvas) {
 			canvasData = await this.plugin.canvasManager.readCanvas(activeCanvas);
 		}
-		const system = this.buildSystemPrompt(canvasData, activeCanvas?.path);
+		const system = this.buildSystemPrompt(canvasData, activeCanvas?.path, imagesToSend.length > 0);
 
-		// Prepend system instruction as a hidden user turn workaround:
-		// ACP session/prompt only sends user prompt. Kimi doesn't have an explicit
-		// system parameter in session/prompt. We prefix the system prompt to the
-		// user text for this MVP.
 		const fullPrompt = `${system}\n\n--- User Request ---\n${text}`;
-		this.plugin.kimi.sendPrompt(fullPrompt);
+		this.plugin.kimi.sendPrompt(fullPrompt, imagesToSend);
+	}
+
+	onFileSelected(evt: Event): void {
+		const input = evt.target as HTMLInputElement;
+		const files = input.files;
+		if (!files || files.length === 0) return;
+
+		for (const file of Array.from(files)) {
+			if (!file.type.startsWith("image/")) continue;
+			const reader = new FileReader();
+			reader.onload = (e) => {
+				const result = e.target?.result as string;
+				if (!result) return;
+				const base64 = result.split(",")[1];
+				this.pendingImages.push({ mimeType: file.type, data: base64 });
+				this.updatePendingImagePreview();
+			};
+			reader.readAsDataURL(file);
+		}
+		input.value = "";
+	}
+
+	updatePendingImagePreview(): void {
+		// Simple preview above input area could be added later; for now we rely on input placeholder change
+		if (this.inputEl) {
+			const count = this.pendingImages.length;
+			this.inputEl.placeholder = count > 0 ? `${count} image(s) attached. Type a message...` : "Ask Kimi about your canvas, or type a command...";
+		}
+	}
+
+	clearPendingImagePreview(): void {
+		if (this.inputEl) {
+			this.inputEl.placeholder = "Ask Kimi about your canvas, or type a command...";
+		}
+	}
+
+	async triggerManualScreenshot(): Promise<void> {
+		if (this.isProcessing) return;
+		this.appendSystemMessage("Capturing screenshot...");
+		const image = await this.captureScreen();
+		if (!image) {
+			this.appendSystemMessage("Failed to capture screenshot.");
+			return;
+		}
+		this.pendingImages.push(image);
+		this.updatePendingImagePreview();
+		this.appendSystemMessage("Screenshot captured. It will be sent with your next message.");
+	}
+
+	async handleScreenshotAction(): Promise<void> {
+		this.appendSystemMessage("Kimi requested a screenshot. Capturing now...");
+		const image = await this.captureScreen();
+		if (!image) {
+			this.appendSystemMessage("Failed to capture screenshot.");
+			this.setProcessing(false);
+			return;
+		}
+		this.appendSystemMessage("Screenshot captured and sent back to Kimi.");
+		this.setProcessing(true);
+		this.updateStatus("prompting");
+
+		const activeCanvas = this.getActiveCanvasFile();
+		let canvasData: CanvasData | undefined;
+		if (activeCanvas) {
+			canvasData = await this.plugin.canvasManager.readCanvas(activeCanvas);
+		}
+		const system = this.buildSystemPrompt(canvasData, activeCanvas?.path, true);
+		const promptText = `${system}\n\n--- User Request ---\nHere is the screenshot of the current canvas. Please analyze the visual layout and suggest improvements. If needed, output a canvas operation block.`;
+		this.plugin.kimi.sendPrompt(promptText, [image]);
+	}
+
+	async captureScreen(): Promise<ImagePayload | null> {
+		const { screenshotMode } = this.plugin.settings;
+		const tmpPath = `${this.plugin.getVaultPath()}/.obsidian/plugins/obsidian-kimi-canvas/.tmp-screenshot.png`;
+		let args: string[] = [];
+		if (screenshotMode === "full") {
+			args = ["-x", tmpPath];
+		} else if (screenshotMode === "window") {
+			args = ["-w", tmpPath];
+		} else {
+			args = ["-i", tmpPath];
+		}
+		try {
+			await new Promise<void>((resolve, reject) => {
+				const { execFile } = require("child_process");
+				execFile("screencapture", args, (err: any) => {
+					if (err) reject(err);
+					else resolve();
+				});
+			});
+			const data = await this.app.vault.adapter.readBinary(tmpPath);
+			const base64 = this.arrayBufferToBase64(data);
+			return { mimeType: "image/png", data: base64 };
+		} catch (e) {
+			console.error("Screenshot failed:", e);
+			return null;
+		}
+	}
+
+	arrayBufferToBase64(buffer: ArrayBuffer): string {
+		const bytes = new Uint8Array(buffer);
+		let binary = "";
+		for (let i = 0; i < bytes.byteLength; i++) {
+			binary += String.fromCharCode(bytes[i]);
+		}
+		return btoa(binary);
 	}
 
 	getActiveCanvasFile(): TFile | null {
@@ -300,11 +443,21 @@ export class KimiChatView extends ItemView {
 		return canvasFile;
 	}
 
-	buildSystemPrompt(canvasData?: CanvasData, canvasPath?: string): string {
+	buildSystemPrompt(canvasData?: CanvasData, canvasPath?: string, hasImages = false): string {
 		let prompt =
 			"You are Kimi Canvas, an AI assistant embedded in Obsidian. " +
 			"You help users think, organize, and visualize ideas on an infinite canvas. " +
-			"You can read and modify Obsidian Canvas files (JSON Canvas format).\n\n" +
+			"You can read and modify Obsidian Canvas files (JSON Canvas format).\n\n";
+
+		if (hasImages) {
+			prompt +=
+				"You are provided with screenshot(s) of the current canvas. " +
+				"Analyze the visual layout, spacing, alignment, color grouping, and node density. " +
+				"Suggest concrete layout improvements based on what you see. " +
+				"If you output a canvas operation block, ensure it respects the existing visual structure and fixes obvious overlaps or misalignments.\n\n";
+		}
+
+		prompt +=
 			"When the user asks you to change the canvas, you MUST reply with a human-friendly explanation first, " +
 			"then append a special JSON Canvas operation block at the very end of your response using this exact format:\n\n" +
 			"// kimi-canvas-op\n" +
@@ -318,7 +471,9 @@ export class KimiChatView extends ItemView {
 			"4. For file nodes, include 'file' (path inside vault).\n" +
 			"5. Each edge must have: id, fromNode, toNode. Optional: fromSide, toSide, fromEnd, toEnd, label, color.\n" +
 			"6. If you create new nodes, generate short random alphanumeric IDs (8 chars).\n" +
-			"7. You do NOT need to worry about exact coordinates: the plugin will run auto-layout after applying your changes.\n\n";
+			"7. You do NOT need to worry about exact coordinates: the plugin will run auto-layout after applying your changes.\n\n" +
+			"If you need to visually inspect the current canvas layout, output exactly `// kimi-action: screenshot`. " +
+			"The plugin will capture the screen and send the image back to you automatically.\n\n";
 
 		if (canvasData && canvasPath) {
 			prompt += `The current canvas file is: ${canvasPath}\nCurrent canvas JSON:\n${JSON.stringify(canvasData, null, 2)}\n\n`;

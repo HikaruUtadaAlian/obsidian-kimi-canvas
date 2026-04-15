@@ -11,6 +11,11 @@ export interface PromptDoneInfo {
 	fullText: string;
 }
 
+export interface ImagePayload {
+	mimeType: string;
+	data: string; // base64 without prefix
+}
+
 type BridgeState = "idle" | "connecting" | "initializing" | "creating_session" | "ready" | "prompting";
 
 export class KimiBridge extends EventEmitter {
@@ -98,7 +103,7 @@ export class KimiBridge extends EventEmitter {
 		this.sendRequest("initialize", {
 			protocolVersion: 1,
 			clientCapabilities: {},
-			clientInfo: { name: "obsidian-kimi-canvas", version: "0.2.0" },
+			clientInfo: { name: "obsidian-kimi-canvas", version: "0.3.0" },
 		});
 		this.state = "initializing";
 	}
@@ -129,15 +134,28 @@ export class KimiBridge extends EventEmitter {
 		this.cp?.stdin?.write(line);
 	}
 
-	sendPrompt(text: string): void {
+	sendPrompt(text: string, images?: ImagePayload[]): void {
 		if (this.state !== "ready" || !this.sessionId) {
 			this.emit("error", "Kimi ACP is not ready. Please wait for connection or reconnect.");
 			return;
 		}
 		this.messageAccumulator = "";
+		const prompt: any[] = [];
+		if (text.trim()) {
+			prompt.push({ type: "text", text });
+		}
+		if (images && images.length > 0) {
+			for (const img of images) {
+				prompt.push({ type: "image", data: img.data, mimeType: img.mimeType });
+			}
+		}
+		if (prompt.length === 0) {
+			this.emit("error", "Cannot send empty prompt.");
+			return;
+		}
 		this.sendRequest("session/prompt", {
 			sessionId: this.sessionId,
-			prompt: [{ type: "text", text }],
+			prompt,
 		});
 		this.state = "prompting";
 		this.emit("promptStarted");

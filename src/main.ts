@@ -13,12 +13,16 @@ interface KimiCanvasSettings {
 	kimiPath: string;
 	autoLayoutOnUpdate: boolean;
 	defaultLayoutDirection: "lr" | "tb";
+	screenshotMode: "full" | "window" | "region";
+	autoScreenshotOnLayoutRequest: boolean;
 }
 
 const DEFAULT_SETTINGS: KimiCanvasSettings = {
 	kimiPath: "/Users/utadahikaru/.local/bin/kimi",
 	autoLayoutOnUpdate: true,
 	defaultLayoutDirection: "lr",
+	screenshotMode: "window",
+	autoScreenshotOnLayoutRequest: true,
 };
 
 export default class KimiCanvasPlugin extends Plugin {
@@ -54,6 +58,27 @@ export default class KimiCanvasPlugin extends Plugin {
 					this.autoLayoutFile(file);
 				}
 				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "kimi-canvas-screenshot",
+			name: "Capture canvas screenshot for Kimi",
+			callback: () => {
+				const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_KIMI_CHAT);
+				if (leaves.length > 0) {
+					const view = leaves[0].view as KimiChatView;
+					view.triggerManualScreenshot();
+				} else {
+					this.activateView().then(() => {
+						setTimeout(() => {
+							const newLeaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_KIMI_CHAT);
+							if (newLeaves.length > 0) {
+								(newLeaves[0].view as KimiChatView).triggerManualScreenshot();
+							}
+						}, 500);
+					});
+				}
 			},
 		});
 
@@ -150,6 +175,33 @@ class KimiCanvasSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.defaultLayoutDirection)
 					.onChange(async (value) => {
 						this.plugin.settings.defaultLayoutDirection = value as "lr" | "tb";
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Screenshot mode")
+			.setDesc("How to capture the screen when Kimi requests a screenshot or you click the camera button.")
+			.addDropdown((drop) =>
+				drop
+					.addOption("full", "Full Screen")
+					.addOption("window", "Active Window")
+					.addOption("region", "Selected Region")
+					.setValue(this.plugin.settings.screenshotMode)
+					.onChange(async (value) => {
+						this.plugin.settings.screenshotMode = value as "full" | "window" | "region";
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Auto-respond to screenshot requests")
+			.setDesc("If enabled, the plugin will automatically capture the screen and send it back when Kimi outputs // kimi-action: screenshot.")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.autoScreenshotOnLayoutRequest)
+					.onChange(async (value) => {
+						this.plugin.settings.autoScreenshotOnLayoutRequest = value;
 						await this.plugin.saveSettings();
 					})
 			);
