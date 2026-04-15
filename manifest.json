@@ -1,0 +1,9 @@
+{
+  "id": "kimi-canvas",
+  "name": "Kimi Canvas",
+  "version": "0.2.0",
+  "minAppVersion": "1.5.0",
+  "description": "Integrate Kimi Code CLI into Obsidian with powerful Canvas auto-layout and AI-guided whiteboard operations.",
+  "author": "Kimi Canvas Team",
+  "isDesktopOnly": true
+}
