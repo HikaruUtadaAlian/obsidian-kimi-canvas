@@ -180,6 +180,14 @@ export class KimiChatView extends ItemView {
 		this.renderStaticMessage("system", text);
 	}
 
+	appendErrorMessage(text: string): void {
+		if (!this.messageContainer) return;
+		const row = this.messageContainer.createEl("div", { cls: "kimi-msg-row kimi-msg-error" });
+		const bubble = row.createEl("div", { cls: "kimi-msg-bubble" });
+		bubble.createEl("div", { cls: "kimi-msg-content" }).innerHTML = this.markdownToHtml(text);
+		this.scrollToBottom();
+	}
+
 	renderStaticMessage(role: "user" | "assistant" | "system", text: string, imagePreviews?: string[]): void {
 		if (!this.messageContainer) return;
 		const row = this.messageContainer.createEl("div", { cls: `kimi-msg-row kimi-msg-${role}` });
@@ -363,9 +371,9 @@ export class KimiChatView extends ItemView {
 	async triggerManualScreenshot(): Promise<void> {
 		if (this.isProcessing) return;
 		this.appendSystemMessage("Capturing screenshot...");
-		const image = await this.captureScreen();
+		const { image, error } = await this.captureScreen();
 		if (!image) {
-			this.appendSystemMessage("Failed to capture screenshot.");
+			this.appendErrorMessage(`Failed to capture screenshot.\nReason: ${error ?? "Unknown error"}`);
 			return;
 		}
 		this.pendingImages.push(image);
@@ -375,9 +383,9 @@ export class KimiChatView extends ItemView {
 
 	async handleScreenshotAction(): Promise<void> {
 		this.appendSystemMessage("Kimi requested a screenshot. Capturing now...");
-		const image = await this.captureScreen();
+		const { image, error } = await this.captureScreen();
 		if (!image) {
-			this.appendSystemMessage("Failed to capture screenshot.");
+			this.appendErrorMessage(`Failed to capture screenshot.\nReason: ${error ?? "Unknown error"}`);
 			this.setProcessing(false);
 			return;
 		}
@@ -395,7 +403,7 @@ export class KimiChatView extends ItemView {
 		this.plugin.kimi.sendPrompt(promptText, [image]);
 	}
 
-	async captureScreen(): Promise<ImagePayload | null> {
+	async captureScreen(): Promise<{ image: ImagePayload | null; error?: string }> {
 		const { screenshotMode } = this.plugin.settings;
 		const tmpPath = `${this.plugin.getVaultPath()}/.obsidian/plugins/obsidian-kimi-canvas/.tmp-screenshot.png`;
 		let args: string[] = [];
@@ -416,10 +424,11 @@ export class KimiChatView extends ItemView {
 			});
 			const data = await this.app.vault.adapter.readBinary(tmpPath);
 			const base64 = this.arrayBufferToBase64(data);
-			return { mimeType: "image/png", data: base64 };
-		} catch (e) {
+			return { image: { mimeType: "image/png", data: base64 } };
+		} catch (e: any) {
 			console.error("Screenshot failed:", e);
-			return null;
+			const reason = e?.message ?? String(e);
+			return { image: null, error: reason };
 		}
 	}
 

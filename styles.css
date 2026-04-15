@@ -118,6 +118,18 @@
 	font-size: var(--font-ui-smaller);
 }
 
+.kimi-msg-error {
+	justify-content: flex-start;
+}
+
+.kimi-msg-error .kimi-msg-bubble {
+	background: rgba(var(--color-red-rgb), 0.08);
+	color: var(--color-red);
+	border: 1px solid var(--color-red);
+	border-bottom-left-radius: 2px;
+	font-size: var(--font-ui-small);
+}
+
 .kimi-msg-content pre {
 	margin: 6px 0;
 	padding: 8px;

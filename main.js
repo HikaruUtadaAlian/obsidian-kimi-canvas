@@ -564,6 +564,14 @@ Please run "kimi login" in your terminal first.`);
   appendSystemMessage(text) {
     this.renderStaticMessage("system", text);
   }
+  appendErrorMessage(text) {
+    if (!this.messageContainer)
+      return;
+    const row = this.messageContainer.createEl("div", { cls: "kimi-msg-row kimi-msg-error" });
+    const bubble = row.createEl("div", { cls: "kimi-msg-bubble" });
+    bubble.createEl("div", { cls: "kimi-msg-content" }).innerHTML = this.markdownToHtml(text);
+    this.scrollToBottom();
+  }
   renderStaticMessage(role, text, imagePreviews) {
     if (!this.messageContainer)
       return;
@@ -729,9 +737,10 @@ ${text}`;
     if (this.isProcessing)
       return;
     this.appendSystemMessage("Capturing screenshot...");
-    const image = await this.captureScreen();
+    const { image, error } = await this.captureScreen();
     if (!image) {
-      this.appendSystemMessage("Failed to capture screenshot.");
+      this.appendErrorMessage(`Failed to capture screenshot.
+Reason: ${error ?? "Unknown error"}`);
       return;
     }
     this.pendingImages.push(image);
@@ -740,9 +749,10 @@ ${text}`;
   }
   async handleScreenshotAction() {
     this.appendSystemMessage("Kimi requested a screenshot. Capturing now...");
-    const image = await this.captureScreen();
+    const { image, error } = await this.captureScreen();
     if (!image) {
-      this.appendSystemMessage("Failed to capture screenshot.");
+      this.appendErrorMessage(`Failed to capture screenshot.
+Reason: ${error ?? "Unknown error"}`);
       this.setProcessing(false);
       return;
     }
@@ -784,10 +794,11 @@ Here is the screenshot of the current canvas. Please analyze the visual layout a
       });
       const data = await this.app.vault.adapter.readBinary(tmpPath);
       const base64 = this.arrayBufferToBase64(data);
-      return { mimeType: "image/png", data: base64 };
+      return { image: { mimeType: "image/png", data: base64 } };
     } catch (e) {
       console.error("Screenshot failed:", e);
-      return null;
+      const reason = e?.message ?? String(e);
+      return { image: null, error: reason };
     }
   }
   arrayBufferToBase64(buffer) {
