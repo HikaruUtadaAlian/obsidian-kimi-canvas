@@ -21,7 +21,7 @@ const DEFAULT_SETTINGS: KimiCanvasSettings = {
 	kimiPath: "/Users/utadahikaru/.local/bin/kimi",
 	autoLayoutOnUpdate: true,
 	defaultLayoutDirection: "lr",
-	screenshotMode: "window",
+	screenshotMode: "full",
 	autoScreenshotOnLayoutRequest: true,
 };
 

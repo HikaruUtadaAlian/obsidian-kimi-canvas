@@ -405,7 +405,7 @@ export class KimiChatView extends ItemView {
 
 	async captureScreen(): Promise<{ image: ImagePayload | null; error?: string }> {
 		const { screenshotMode } = this.plugin.settings;
-		const tmpPath = `${this.plugin.getVaultPath()}/.obsidian/plugins/obsidian-kimi-canvas/.tmp-screenshot.png`;
+		const tmpPath = "/tmp/obsidian-kimi-canvas-screenshot.png";
 		let args: string[] = [];
 		if (screenshotMode === "full") {
 			args = ["-x", tmpPath];
@@ -415,20 +415,33 @@ export class KimiChatView extends ItemView {
 			args = ["-i", tmpPath];
 		}
 		try {
-			await new Promise<void>((resolve, reject) => {
-				const { execFile } = require("child_process");
-				execFile("screencapture", args, (err: any) => {
-					if (err) reject(err);
-					else resolve();
+			const { execFile } = require("child_process");
+			const stderr = await new Promise<string>((resolve, reject) => {
+				let errOut = "";
+				const child = execFile("screencapture", args, (err: any) => {
+					if (err) {
+						reject(new Error(errOut.trim() || err.message));
+					} else {
+						resolve(errOut.trim());
+					}
+				});
+				child.stderr?.on("data", (chunk: Buffer) => {
+					errOut += chunk.toString("utf-8");
 				});
 			});
+			if (stderr) {
+				console.warn("screencapture stderr:", stderr);
+			}
 			const fs = require("fs");
 			const buffer = fs.readFileSync(tmpPath) as Buffer;
 			const base64 = buffer.toString("base64");
 			return { image: { mimeType: "image/png", data: base64 } };
 		} catch (e: any) {
 			console.error("Screenshot failed:", e);
-			const reason = e?.message ?? String(e);
+			let reason = e?.message ?? String(e);
+			if ((screenshotMode === "window" || screenshotMode === "region") && reason.includes("could not create image")) {
+				reason += "\n\nTip: Window/Region mode requires user interaction. Please switch to 'Full Screen' mode in Kimi Canvas settings for automatic capture.";
+			}
 			return { image: null, error: reason };
 		}
 	}

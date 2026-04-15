@@ -773,7 +773,7 @@ Here is the screenshot of the current canvas. Please analyze the visual layout a
   }
   async captureScreen() {
     const { screenshotMode } = this.plugin.settings;
-    const tmpPath = `${this.plugin.getVaultPath()}/.obsidian/plugins/obsidian-kimi-canvas/.tmp-screenshot.png`;
+    const tmpPath = "/tmp/obsidian-kimi-canvas-screenshot.png";
     let args = [];
     if (screenshotMode === "full") {
       args = ["-x", tmpPath];
@@ -783,22 +783,33 @@ Here is the screenshot of the current canvas. Please analyze the visual layout a
       args = ["-i", tmpPath];
     }
     try {
-      await new Promise((resolve, reject) => {
-        const { execFile } = require("child_process");
-        execFile("screencapture", args, (err) => {
-          if (err)
-            reject(err);
-          else
-            resolve();
+      const { execFile } = require("child_process");
+      const stderr = await new Promise((resolve, reject) => {
+        let errOut = "";
+        const child = execFile("screencapture", args, (err) => {
+          if (err) {
+            reject(new Error(errOut.trim() || err.message));
+          } else {
+            resolve(errOut.trim());
+          }
+        });
+        child.stderr?.on("data", (chunk) => {
+          errOut += chunk.toString("utf-8");
         });
       });
+      if (stderr) {
+        console.warn("screencapture stderr:", stderr);
+      }
       const fs = require("fs");
       const buffer = fs.readFileSync(tmpPath);
       const base64 = buffer.toString("base64");
       return { image: { mimeType: "image/png", data: base64 } };
     } catch (e) {
       console.error("Screenshot failed:", e);
-      const reason = e?.message ?? String(e);
+      let reason = e?.message ?? String(e);
+      if ((screenshotMode === "window" || screenshotMode === "region") && reason.includes("could not create image")) {
+        reason += "\n\nTip: Window/Region mode requires user interaction. Please switch to 'Full Screen' mode in Kimi Canvas settings for automatic capture.";
+      }
       return { image: null, error: reason };
     }
   }
@@ -861,7 +872,7 @@ var DEFAULT_SETTINGS = {
   kimiPath: "/Users/utadahikaru/.local/bin/kimi",
   autoLayoutOnUpdate: true,
   defaultLayoutDirection: "lr",
-  screenshotMode: "window",
+  screenshotMode: "full",
   autoScreenshotOnLayoutRequest: true
 };
 var KimiCanvasPlugin = class extends import_obsidian2.Plugin {
