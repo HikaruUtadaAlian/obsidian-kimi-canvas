@@ -792,8 +792,9 @@ Here is the screenshot of the current canvas. Please analyze the visual layout a
             resolve();
         });
       });
-      const data = await this.app.vault.adapter.readBinary(tmpPath);
-      const base64 = this.arrayBufferToBase64(data);
+      const fs = require("fs");
+      const buffer = fs.readFileSync(tmpPath);
+      const base64 = buffer.toString("base64");
       return { image: { mimeType: "image/png", data: base64 } };
     } catch (e) {
       console.error("Screenshot failed:", e);

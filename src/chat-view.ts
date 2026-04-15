@@ -422,8 +422,9 @@ export class KimiChatView extends ItemView {
 					else resolve();
 				});
 			});
-			const data = await this.app.vault.adapter.readBinary(tmpPath);
-			const base64 = this.arrayBufferToBase64(data);
+			const fs = require("fs");
+			const buffer = fs.readFileSync(tmpPath) as Buffer;
+			const base64 = buffer.toString("base64");
 			return { image: { mimeType: "image/png", data: base64 } };
 		} catch (e: any) {
 			console.error("Screenshot failed:", e);
