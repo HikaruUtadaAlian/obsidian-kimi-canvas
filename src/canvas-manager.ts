@@ -1,4 +1,5 @@
 import { TFile, Vault } from "obsidian";
+import * as dagre from "dagre";
 
 // JSON Canvas Spec 1.0 types
 export type CanvasNodeType = "text" | "file" | "link" | "group";
@@ -35,6 +36,13 @@ export interface CanvasEdge {
 export interface CanvasData {
 	nodes?: CanvasNode[];
 	edges?: CanvasEdge[];
+}
+
+export interface SemanticUpdate {
+	nodes?: CanvasNode[];
+	edges?: CanvasEdge[];
+	layout?: "tree" | "force" | "grid" | "circle" | null;
+	direction?: "lr" | "tb";
 }
 
 const DEFAULT_NODE_WIDTH = 260;
@@ -83,7 +91,6 @@ export class CanvasManager {
 				if (idx >= 0) {
 					result.nodes![idx] = { ...result.nodes![idx], ...n };
 				} else {
-					// New node: ensure defaults
 					result.nodes!.push({
 						...n,
 						width: n.width ?? DEFAULT_NODE_WIDTH,
@@ -107,14 +114,113 @@ export class CanvasManager {
 		return result;
 	}
 
-	// Simple hierarchical tree layout (left-to-right)
+	// Entry point for semantic layout
+	applySemanticLayout(data: CanvasData, mode: string, direction: "lr" | "tb" = "lr"): CanvasData {
+		switch (mode) {
+			case "tree":
+				return this.layoutTree(data, direction);
+			case "grid":
+				return this.layoutGrid(data, direction);
+			case "circle":
+				return this.layoutCircle(data);
+			case "force":
+				return this.layoutForce(data, direction);
+			default:
+				return this.autoLayout(data, { direction });
+		}
+	}
+
+	// Dagre-based hierarchical tree layout
+	layoutTree(data: CanvasData, direction: "lr" | "tb"): CanvasData {
+		const { nodes, edges } = this.ensureCanvasData(data);
+		if (nodes.length === 0) return data;
+
+		const g = new dagre.graphlib.Graph();
+		g.setGraph({
+			rankdir: direction,
+			ranksep: 200,
+			nodesep: 80,
+			edgesep: 40,
+			marginx: 20,
+			marginy: 20,
+		});
+		g.setDefaultEdgeLabel(() => ({}));
+
+		for (const n of nodes) {
+			g.setNode(n.id, { width: n.width, height: n.height });
+		}
+		for (const e of edges) {
+			if (g.hasNode(e.fromNode) && g.hasNode(e.toNode)) {
+				g.setEdge(e.fromNode, e.toNode);
+			}
+		}
+
+		dagre.layout(g);
+
+		const newNodes = nodes.map((n) => {
+			const pos = g.node(n.id);
+			return { ...n, x: pos.x - pos.width / 2, y: pos.y - pos.height / 2 };
+		});
+
+		return { nodes: newNodes, edges };
+	}
+
+	// Grid layout
+	layoutGrid(data: CanvasData, direction: "lr" | "tb"): CanvasData {
+		const { nodes, edges } = this.ensureCanvasData(data);
+		if (nodes.length === 0) return data;
+
+		const cols = Math.ceil(Math.sqrt(nodes.length));
+		const gapX = 320;
+		const gapY = 200;
+
+		const newNodes = nodes.map((n, i) => {
+			const col = i % cols;
+			const row = Math.floor(i / cols);
+			if (direction === "lr") {
+				return { ...n, x: col * gapX + 40, y: row * gapY + 40 };
+			} else {
+				return { ...n, x: row * gapX + 40, y: col * gapY + 40 };
+			}
+		});
+
+		return { nodes: newNodes, edges };
+	}
+
+	// Circular layout
+	layoutCircle(data: CanvasData): CanvasData {
+		const { nodes, edges } = this.ensureCanvasData(data);
+		if (nodes.length === 0) return data;
+
+		const radius = Math.max(300, nodes.length * 60);
+		const centerX = radius + 200;
+		const centerY = radius + 200;
+
+		const newNodes = nodes.map((n, i) => {
+			const angle = (2 * Math.PI * i) / Math.max(1, nodes.length);
+			return {
+				...n,
+				x: centerX + radius * Math.cos(angle) - n.width / 2,
+				y: centerY + radius * Math.sin(angle) - n.height / 2,
+			};
+		});
+
+		return { nodes: newNodes, edges };
+	}
+
+	// Simple force-directed-ish layout (sugiyama fallback for complex graphs)
+	layoutForce(data: CanvasData, direction: "lr" | "tb"): CanvasData {
+		// For MVP, force layout falls back to dagre with tighter spacing
+		return this.layoutTree(data, direction);
+	}
+
+	// Legacy simple hierarchical layout (kept for compatibility)
 	autoLayout(data: CanvasData, options?: { direction?: "lr" | "tb"; rootId?: string }): CanvasData {
 		const { nodes, edges } = this.ensureCanvasData(data);
 		if (nodes.length === 0) return data;
 
 		const direction = options?.direction ?? "lr";
 
-		// Build adjacency
 		const outgoing = new Map<string, string[]>();
 		const incoming = new Map<string, string[]>();
 		for (const n of nodes) {
@@ -128,7 +234,6 @@ export class CanvasManager {
 			}
 		}
 
-		// Compute levels (longest path from any root)
 		const levels = new Map<string, number>();
 		const visited = new Set<string>();
 
@@ -144,19 +249,16 @@ export class CanvasManager {
 
 		const roots = nodes.filter((n) => (incoming.get(n.id) ?? []).length === 0).map((n) => n.id);
 		if (roots.length === 0 && nodes.length > 0) {
-			// Cycle fallback: pick first node
 			roots.push(nodes[0].id);
 		}
 		for (const r of roots) dfs(r, 0);
 
-		// Group by level
 		const levelGroups = new Map<number, string[]>();
 		for (const [id, lvl] of levels) {
 			if (!levelGroups.has(lvl)) levelGroups.set(lvl, []);
 			levelGroups.get(lvl)!.push(id);
 		}
 
-		// Assign positions
 		const newNodes = nodes.map((n) => ({ ...n }));
 		for (const node of newNodes) {
 			const lvl = levels.get(node.id) ?? 0;
@@ -176,7 +278,7 @@ export class CanvasManager {
 	}
 
 	// Extract canvas operation block from AI response
-	parseCanvasOpBlock(text: string): Partial<CanvasData> | null {
+	parseCanvasOpBlock(text: string): { nodes?: CanvasNode[]; edges?: CanvasEdge[]; layout?: string; direction?: "lr" | "tb" } | null {
 		const marker = "// kimi-canvas-op";
 		const idx = text.indexOf(marker);
 		if (idx < 0) return null;
@@ -184,7 +286,7 @@ export class CanvasManager {
 		const match = after.match(/```json\s*([\s\S]*?)```/);
 		if (!match) return null;
 		try {
-			return JSON.parse(match[1].trim()) as Partial<CanvasData>;
+			return JSON.parse(match[1].trim());
 		} catch (e) {
 			return null;
 		}

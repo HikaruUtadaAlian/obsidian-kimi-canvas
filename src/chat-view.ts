@@ -261,14 +261,30 @@ export class KimiChatView extends ItemView {
 			if (op) {
 				const current = await this.plugin.canvasManager.readCanvas(activeCanvas);
 				let updated = this.plugin.canvasManager.applyCanvasUpdate(current, op);
-				if (this.plugin.settings.autoLayoutOnUpdate) {
-					updated = this.plugin.canvasManager.autoLayout(updated, {
-						direction: this.plugin.settings.defaultLayoutDirection,
-					});
+
+				// If Kimi asks for a specific layout, run semantic layout engine
+				if (op.layout) {
+					updated = this.plugin.canvasManager.applySemanticLayout(
+						updated,
+						op.layout,
+						op.direction ?? this.plugin.settings.defaultLayoutDirection
+					);
+					canvasApplied = true;
+				} else if (op.nodes || op.edges) {
+					// Backward compatibility: if nodes/edges updated but no layout specified,
+					// optionally auto-layout based on user setting
+					if (this.plugin.settings.autoLayoutOnUpdate) {
+						updated = this.plugin.canvasManager.applySemanticLayout(
+							updated,
+							"tree",
+							this.plugin.settings.defaultLayoutDirection
+						);
+					}
+					canvasApplied = true;
 				}
+
 				await this.plugin.canvasManager.writeCanvas(activeCanvas, updated);
 				displayText = this.plugin.canvasManager.stripCanvasOpBlock(displayText);
-				canvasApplied = true;
 			}
 		}
 
@@ -355,7 +371,6 @@ export class KimiChatView extends ItemView {
 	}
 
 	updatePendingImagePreview(): void {
-		// Simple preview above input area could be added later; for now we rely on input placeholder change
 		if (this.inputEl) {
 			const count = this.pendingImages.length;
 			this.inputEl.placeholder = count > 0 ? `${count} image(s) attached. Type a message...` : "Ask Kimi about your canvas, or type a command...";
@@ -469,34 +484,34 @@ export class KimiChatView extends ItemView {
 	buildSystemPrompt(canvasData?: CanvasData, canvasPath?: string, hasImages = false): string {
 		let prompt =
 			"You are Kimi Canvas, an AI assistant embedded in Obsidian. " +
-			"You help users think, organize, and visualize ideas on an infinite canvas. " +
-			"You can read and modify Obsidian Canvas files (JSON Canvas format).\n\n";
+			"You help users think, organize, and visualize ideas on an infinite canvas.\n\n";
 
 		if (hasImages) {
 			prompt +=
 				"You are provided with screenshot(s) of the current canvas. " +
-				"Analyze the visual layout, spacing, alignment, color grouping, and node density. " +
-				"Suggest concrete layout improvements based on what you see. " +
-				"If you output a canvas operation block, ensure it respects the existing visual structure and fixes obvious overlaps or misalignments.\n\n";
+				"Analyze the visual layout, spacing, alignment, and grouping. " +
+				"Suggest concrete improvements.\n\n";
 		}
 
 		prompt +=
-			"When the user asks you to change the canvas, you MUST reply with a human-friendly explanation first, " +
-			"then append a special JSON Canvas operation block at the very end of your response using this exact format:\n\n" +
+			"You can read the Obsidian Canvas JSON and modify it by appending a special operation block at the very end. " +
+			"You do NOT need to calculate exact coordinates. Instead, describe structural changes and let the plugin handle geometry automatically.\n\n" +
+			"Use this exact format:\n\n" +
 			"// kimi-canvas-op\n" +
 			"```json\n" +
-			"{ \"nodes\": [...], \"edges\": [...] }\n" +
+			'{ "layout": "tree", "direction": "lr" }\n' +
 			"```\n\n" +
-			"Rules for the operation block:\n" +
-			"1. Only include fields you want to add or update.\n" +
-			"2. Each node must have: id, type (text/file/link/group), x, y, width, height.\n" +
-			"3. For text nodes, include a 'text' field with Markdown content.\n" +
-			"4. For file nodes, include 'file' (path inside vault).\n" +
-			"5. Each edge must have: id, fromNode, toNode. Optional: fromSide, toSide, fromEnd, toEnd, label, color.\n" +
-			"6. If you create new nodes, generate short random alphanumeric IDs (8 chars).\n" +
-			"7. You do NOT need to worry about exact coordinates: the plugin will run auto-layout after applying your changes.\n\n" +
-			"If you need to visually inspect the current canvas layout, output exactly `// kimi-action: screenshot`. " +
-			"The plugin will capture the screen and send the image back to you automatically.\n\n";
+			"Available layouts: tree, grid, circle, force.\n" +
+			"If you also want to add or update nodes/edges, combine them in the same block:\n\n" +
+			"```json\n" +
+			'{ "nodes": [...], "edges": [...], "layout": "tree", "direction": "lr" }\n' +
+			"```\n\n" +
+			"Rules:\n" +
+			"1. `layout` tells the plugin which algorithm to run (tree, grid, circle, force).\n" +
+			"2. `direction` is optional: 'lr' (left-to-right) or 'tb' (top-to-bottom).\n" +
+			"3. For new nodes, provide id, type, width, height, and text/file/url as needed.\n" +
+			"4. For new edges, provide id, fromNode, toNode.\n" +
+			"5. If you need to visually inspect the layout first, output exactly `// kimi-action: screenshot`.\n\n";
 
 		if (canvasData && canvasPath) {
 			prompt += `The current canvas file is: ${canvasPath}\nCurrent canvas JSON:\n${JSON.stringify(canvasData, null, 2)}\n\n`;

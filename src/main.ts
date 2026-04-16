@@ -49,13 +49,69 @@ export default class KimiCanvasPlugin extends Plugin {
 
 		this.addCommand({
 			id: "kimi-auto-layout-canvas",
-			name: "Auto-layout current canvas",
+			name: "Auto-layout current canvas (legacy)",
 			checkCallback: (checking: boolean) => {
 				const file = this.app.workspace.getActiveFile();
 				const isCanvas = file?.extension === "canvas";
 				if (checking) return isCanvas;
 				if (file && isCanvas) {
 					this.autoLayoutFile(file);
+				}
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "kimi-layout-tree-canvas",
+			name: "Layout canvas as Tree",
+			checkCallback: (checking: boolean) => {
+				const file = this.app.workspace.getActiveFile();
+				const isCanvas = file?.extension === "canvas";
+				if (checking) return isCanvas;
+				if (file && isCanvas) {
+					this.applySemanticLayoutFile(file, "tree");
+				}
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "kimi-layout-grid-canvas",
+			name: "Layout canvas as Grid",
+			checkCallback: (checking: boolean) => {
+				const file = this.app.workspace.getActiveFile();
+				const isCanvas = file?.extension === "canvas";
+				if (checking) return isCanvas;
+				if (file && isCanvas) {
+					this.applySemanticLayoutFile(file, "grid");
+				}
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "kimi-layout-circle-canvas",
+			name: "Layout canvas as Circle",
+			checkCallback: (checking: boolean) => {
+				const file = this.app.workspace.getActiveFile();
+				const isCanvas = file?.extension === "canvas";
+				if (checking) return isCanvas;
+				if (file && isCanvas) {
+					this.applySemanticLayoutFile(file, "circle");
+				}
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "kimi-layout-force-canvas",
+			name: "Layout canvas as Force-directed",
+			checkCallback: (checking: boolean) => {
+				const file = this.app.workspace.getActiveFile();
+				const isCanvas = file?.extension === "canvas";
+				if (checking) return isCanvas;
+				if (file && isCanvas) {
+					this.applySemanticLayoutFile(file, "force");
 				}
 				return true;
 			},
@@ -122,6 +178,12 @@ export default class KimiCanvasPlugin extends Plugin {
 		const laidOut = this.canvasManager.autoLayout(data, {
 			direction: this.settings.defaultLayoutDirection,
 		});
+		await this.canvasManager.writeCanvas(file, laidOut);
+	}
+
+	async applySemanticLayoutFile(file: import("obsidian").TFile, mode: string): Promise<void> {
+		const data = await this.canvasManager.readCanvas(file);
+		const laidOut = this.canvasManager.applySemanticLayout(data, mode, this.settings.defaultLayoutDirection);
 		await this.canvasManager.writeCanvas(file, laidOut);
 	}
 }
