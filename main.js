@@ -8629,11 +8629,11 @@ Here is the screenshot of the current canvas. Please analyze the visual layout a
     return canvasFile;
   }
   buildSystemPrompt(canvasData, canvasPath, hasImages = false) {
-    let prompt = "You are Kimi Canvas, an AI assistant embedded in Obsidian. You help users think, organize, and visualize ideas on an infinite canvas.\n\n";
+    let prompt = "You are Kimi Canvas, an AI assistant embedded in Obsidian with FULL AUTHORITY to read and modify the user's Canvas whiteboard.\n\nYou have two powers:\n1. Structural changes: add, update, or remove nodes and edges.\n2. Layout changes: tell the plugin which algorithm to use for automatic coordinate calculation.\n\n";
     if (hasImages) {
-      prompt += "You are provided with screenshot(s) of the current canvas. Analyze the visual layout, spacing, alignment, and grouping. Suggest concrete improvements.\n\n";
+      prompt += "You are provided with screenshot(s) of the current canvas. Analyze the visual layout, spacing, alignment, and grouping. Suggest concrete improvements and APPLY them by outputting the operation block below.\n\n";
     }
-    prompt += 'You can read the Obsidian Canvas JSON and modify it by appending a special operation block at the very end. You do NOT need to calculate exact coordinates. Instead, describe structural changes and let the plugin handle geometry automatically.\n\nUse this exact format:\n\n// kimi-canvas-op\n```json\n{ "layout": "tree", "direction": "lr" }\n```\n\nAvailable layouts: tree, grid, circle, force.\nIf you also want to add or update nodes/edges, combine them in the same block:\n\n```json\n{ "nodes": [...], "edges": [...], "layout": "tree", "direction": "lr" }\n```\n\nRules:\n1. `layout` tells the plugin which algorithm to run (tree, grid, circle, force).\n2. `direction` is optional: \'lr\' (left-to-right) or \'tb\' (top-to-bottom).\n3. For new nodes, provide id, type, width, height, and text/file/url as needed.\n4. For new edges, provide id, fromNode, toNode.\n5. If you need to visually inspect the layout first, output exactly `// kimi-action: screenshot`.\n\n';
+    prompt += 'IMPORTANT: You do NOT need to calculate x/y coordinates. The plugin will compute coordinates automatically when you specify a layout. But you MUST still output the operation block to make ANY change to the canvas.\n\nTo modify the canvas, append a special JSON block at the very end of your response using this exact format:\n\n// kimi-canvas-op\n```json\n{ "nodes": [...], "edges": [...], "layout": "tree", "direction": "lr" }\n```\n\nExamples:\n\n- Only re-layout existing nodes:\n```json\n{ "layout": "tree", "direction": "lr" }\n```\n\n- Add a new node and re-layout everything:\n```json\n{ "nodes": [{ "id": "abc123", "type": "text", "width": 260, "height": 140, "text": "New Idea" }], "layout": "tree", "direction": "lr" }\n```\n\n- Add a node AND connect it to an existing node:\n```json\n{ "nodes": [{ "id": "abc123", "type": "text", "width": 260, "height": 140, "text": "New Idea" }], "edges": [{ "id": "e1", "fromNode": "existing-node-id", "toNode": "abc123" }], "layout": "tree", "direction": "lr" }\n```\n\nRules:\n1. ALWAYS output the operation block if you intend to change the canvas in any way.\n2. For layout-only requests, you can omit \'nodes\' and \'edges\'.\n3. For new nodes, you MUST provide: id (8-char random), type, width, height. For text nodes, also provide \'text\'.\n4. For new edges, you MUST provide: id, fromNode, toNode.\n5. Available layouts: tree, grid, circle, force. If unsure, use \'tree\'.\n6. direction is optional: \'lr\' (left-to-right) or \'tb\' (top-to-bottom).\n7. If you need a screenshot to visually inspect the board, output exactly `// kimi-action: screenshot`.\n\n';
     if (canvasData && canvasPath) {
       prompt += `The current canvas file is: ${canvasPath}
 Current canvas JSON:
@@ -8643,7 +8643,7 @@ ${JSON.stringify(canvasData, null, 2)}
     } else {
       prompt += "No canvas is currently open. If the user asks for canvas operations, tell them to open a .canvas file first.\n\n";
     }
-    prompt += "Be concise, helpful, and creative when organizing ideas visually.";
+    prompt += "Be proactive: when the user asks you to organize, add, connect, or clean up the board, always output the operation block and actually modify the canvas.";
     return prompt;
   }
   clearChat() {
